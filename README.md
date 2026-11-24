@@ -4,6 +4,10 @@ HTTP Client 是一个独立桌面 HTTP 请求测试工具。应用使用 Tauri 2
 
 当前版本：`0.1.0`
 
+<img width="1270" height="787" alt="截屏2026-11-24 22 56 26" src="https://github.com/user-attachments/assets/23ccc589-100e-4ed4-bb34-eba27693be85" />
+<img width="1278" height="786" alt="截屏2026-11-24 22 55 56" src="https://github.com/user-attachments/assets/8c1332e7-c8dc-4c7d-afac-f2f983507baa" />
+
+
 ## 功能概览
 
 - 支持 GET、POST、PUT、PATCH、DELETE、HEAD、OPTIONS。
