@@ -1,10 +1,9 @@
 name: Build Desktop App
 
 on:
-  workflow_dispatch: # 允许手动触发，方便测试
-  # push:
-    # tags:
-      # - 'v*' # 触发标签或者分支
+  push:
+    tags:
+      - 'v*' # 触发标签或者分支
 
 permissions:
   contents: read
