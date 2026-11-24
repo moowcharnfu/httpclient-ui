@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP Test</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='monospace'%3E%7B%7D%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">HTTP Test<span class="sub">Rust 请求引擎 · 无损 JSON · 跨平台桌面应用</span></div>
+  <div class="header-actions">
+    <button id="btnCurl" title="粘贴 cURL 命令并转换为当前请求">导入 cURL</button>
+    <button id="btnVars">全局变量 <span id="varsCount" class="count"></span></button>
+    <button id="btnHistory">历史记录 <span id="histCount" class="count"></span></button>
+    <button id="btnStop" class="danger" title="退出 HTTP Test 应用">退出应用</button>
+  </div>
+</header>
+
+<main>
+  <section id="requestPane">
+    <div class="url-bar">
+      <select id="method">
+        <option>GET</option><option>POST</option><option>PUT</option>
+        <option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+      </select>
+      <input id="url" placeholder="https://example.com/api（支持 {{变量}}，无协议头自动补 http://）" spellcheck="false">
+      <button id="btnBatch" title="并发/定时批量发送">并发</button>
+      <button id="btnSend" class="primary">发送</button>
+      <button id="btnCancel" hidden>取消</button>
+    </div>
+    <div class="options-bar">
+      <label>超时(ms) <input id="timeout" type="number" min="0" step="1000" value="30000"></label>
+      <label><input id="followRedirects" type="checkbox" checked> 跟随重定向</label>
+      <label title="跳过 TLS 证书校验，仅用于自签名证书测试"><input id="insecure" type="checkbox"> 忽略证书</label>
+      <span class="hint">Ctrl+Enter 发送</span>
+    </div>
+    <nav class="tabs" id="reqTabs">
+      <button data-tab="params" class="active">Params</button>
+      <button data-tab="headers">Headers</button>
+      <button data-tab="body">Body</button>
+      <button data-tab="pre">前置脚本</button>
+      <button data-tab="post">后置脚本</button>
+    </nav>
+    <div class="tab-panels">
+      <div data-panel="params" class="panel active">
+        <div class="panel-hint">与 URL 查询串双向自动同步；Content-Type 按 Body 类型自动补充（手动设置的优先；form-data 模式除外，其 Content-Type 恒由 boundary 决定）</div>
+        <div id="paramsEditor"></div>
+      </div>
+      <div data-panel="headers" class="panel">
+        <div id="headersEditor"></div>
+      </div>
+      <div data-panel="body" class="panel">
+        <div class="body-bar">
+          <select id="bodyType">
+            <option value="none">none</option>
+            <option value="json">json</option>
+            <option value="form">form-data（multipart）</option>
+            <option value="urlencoded">x-www-form-urlencoded</option>
+            <option value="raw">raw</option>
+            <option value="binary">binary（单文件）</option>
+          </select>
+          <label id="fileLimitBox" title="单文件默认 1MB，可调整到 128MB；实际请求仍受 IPC 256MB 上限约束">
+            单次上传上限(MB) <input id="fileLimit" type="number" min="1" max="128" step="1" value="1">
+          </label>
+          <span id="bodyActions">
+            <button id="btnFormat" class="mini">格式化</button>
+            <button id="btnToForm" class="mini">→ form-data</button>
+            <button id="btnToUrlencoded" class="mini">→ urlencoded</button>
+            <button id="btnToJson" class="mini">→ JSON</button>
+          </span>
+        </div>
+        <textarea id="bodyText" spellcheck="false" placeholder='{"key": "value"}&#10;支持 {{变量}}；大整数按原始文本发送，不经过 JS Number，不丢精度'></textarea>
+        <div id="formEditor"></div>
+        <div id="binaryBox">
+          <input type="file" id="binaryFile">
+          <span id="binaryInfo" class="muted"></span>
+        </div>
+      </div>
+      <div data-panel="pre" class="panel">
+        <details class="script-help">
+          <summary>脚本 API 说明</summary>
+          <pre>可用参数：
+  req      可修改：{ method, url, headers[], query[], bodyType, body, formFields[] }
+  vars     全局变量：get(key) / set(key, value) / remove(key) / all()
+  console  log / warn / error，最多保留 2000 行，输出见响应区「脚本输出」页
+
+执行顺序：前置脚本 → {{变量}} 替换 → 发送
+修改 req.url 的查询串会覆盖 Params 表（URL 优先）；只改参数请修改 req.query
+示例：req.headers.push({ key: 'X-Token', value: vars.get('token'), enabled: true });
+注意：脚本同步执行，死循环会卡住页面；脚本仅本人编写，响应数据经参数传入</pre>
+        </details>
+        <textarea id="preScript" spellcheck="false" placeholder="// 请求发送前执行，可修改 req 与全局变量"></textarea>
+      </div>
+      <div data-panel="post" class="panel">
+        <details class="script-help">
+          <summary>脚本 API 说明</summary>
+          <pre>可用参数：
+  res      只读：status / statusText / headers[] / getHeader(name) / bodyText
+           timeMs / sizeBytes / finalUrl / truncated
+           res.json() → 无损解析，大整数为 LosslessNumber，String(x) 取精确文本
+  vars     get / set / remove / all，set 后自动持久化
+  console  log / warn / error
+
+示例：
+  const data = res.json();
+  vars.set('token', data.token);
+  vars.set('orderId', String(data.orderId));  // long 精确转字符串
+  console.log('status', res.status);</pre>
+        </details>
+        <textarea id="postScript" spellcheck="false" placeholder="// 响应返回后执行，可提取变量、断言、打日志"></textarea>
+      </div>
+    </div>
+  </section>
+
+  <section id="responsePane">
+    <div id="respMeta" class="resp-meta muted">尚未发送请求</div>
+    <nav class="tabs" id="respTabs">
+      <button data-tab="pretty" class="active">可视化</button>
+      <button data-tab="raw">原文</button>
+      <button data-tab="respHeaders">Headers</button>
+      <button data-tab="logs">脚本输出</button>
+      <button data-tab="batch">并发</button>
+      <button data-tab="diff">差异对比</button>
+    </nav>
+    <div class="tab-panels">
+      <div data-panel="pretty" class="panel active">
+        <div class="pretty-bar">
+          <label><input type="checkbox" id="showTypes"> 显示类型</label>
+          <button id="btnExpandAll" class="mini">展开全部</button>
+          <button id="btnCollapseAll" class="mini">折叠全部</button>
+          <span id="longInfo" class="muted"></span>
+          <button id="btnCopyResp" class="mini">复制原文</button>
+        </div>
+        <div id="prettyBox" class="scroll-box"></div>
+      </div>
+      <div data-panel="raw" class="panel">
+        <pre id="rawBox" class="scroll-box raw"></pre>
+      </div>
+      <div data-panel="respHeaders" class="panel">
+        <div id="respHeadersBox" class="scroll-box"></div>
+      </div>
+      <div data-panel="logs" class="panel">
+        <div id="logsBox" class="scroll-box"></div>
+      </div>
+      <div data-panel="batch" class="panel">
+        <div id="batchStats" class="scroll-box"></div>
+      </div>
+      <div data-panel="diff" class="panel">
+        <div class="diff-bar">
+          <select id="diffA" title="响应 A"></select>
+          <span class="muted">vs</span>
+          <select id="diffB" title="响应 B"></select>
+          <button id="btnDiff" class="mini primary">对比</button>
+          <button id="btnDiffLast" class="mini">最近两次</button>
+        </div>
+        <div class="panel-hint">从历史记录中选择两份 JSON 响应，按路径逐层比较：新增 / 删除 / 值变更 / 类型变更（含两侧类型）</div>
+        <div id="diffBox" class="scroll-box"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="drawerMask" hidden></div>
+<aside id="varsDrawer" class="drawer" hidden>
+  <div class="drawer-head"><h3>全局变量</h3><button class="mini" id="closeVars">✕</button></div>
+  <div class="panel-hint">在 URL / Header 名与值 / Query 名与值 / Body / 表单字段名与值中用 {{名称}} 引用；脚本中用 vars.get / vars.set 读写。保存在应用本地存储。</div>
+  <div id="varsEditor"></div>
+  <div class="drawer-foot">
+    <button id="btnExportVars" class="mini">导出 JSON</button>
+    <button id="btnImportVars" class="mini">导入 JSON</button>
+    <input type="file" id="importVarsFile" accept=".json,application/json" hidden>
+  </div>
+</aside>
+<aside id="batchDrawer" class="drawer" hidden>
+  <div class="drawer-head"><h3>并发测试</h3><button class="mini" id="closeBatch">✕</button></div>
+  <div class="panel-hint">以当前请求为模板：每轮同时发出 N 个请求，共 R 轮，轮间隔 I 毫秒。总请求数上限 1000；批量输入总量上限 64MB；前置脚本与变量替换仅执行一次，后置脚本不执行；每份响应最多保留 512KB，达到上限或批次共享 16MB 预算耗尽后停止读取。</div>
+  <div class="batch-form">
+    <label>每轮并发数 <input id="batchCount" type="number" min="1" max="1000" value="10"></label>
+    <label>轮数 <input id="batchRounds" type="number" min="1" max="1000" value="1"></label>
+    <label>轮间隔(ms) <input id="batchInterval" type="number" min="0" max="60000" step="100" value="1000"></label>
+    <div id="batchHint" class="muted">定时调用示例：并发数 1、轮数 10、间隔 500 —— 每 500ms 发 1 个，共 10 个</div>
+    <div id="batchTotal" class="muted">总请求数：10</div>
+  </div>
+  <div class="drawer-foot">
+    <button id="btnBatchStart" class="primary">开始</button>
+    <button id="btnBatchCancel" class="danger" hidden>取消</button>
+    <span id="batchRunning" class="muted" hidden>执行中…完成后自动展示结果</span>
+  </div>
+</aside>
+<aside id="curlDrawer" class="drawer" hidden>
+  <div class="drawer-head"><h3>导入 cURL</h3><button class="mini" id="closeCurl">✕</button></div>
+  <div class="panel-hint">粘贴浏览器“复制为 cURL”或其他 curl 命令。仅解析文本，不执行 Shell，不读取 @file（--data-raw 的前导 @ 按字面量保留）；支持 -X、-H、-d/--data-raw、--json、-u、--max-time、-L、-k 等常用参数。导入会替换当前请求，但保留脚本与上传上限。</div>
+  <textarea id="curlText" spellcheck="false" placeholder="curl --request POST 'https://example.com/api' \
+  --header 'Content-Type: application/json' \
+  --data-raw '{&quot;name&quot;:&quot;HTTP Test&quot;}'"></textarea>
+  <div id="curlMessage" class="curl-message" role="status" aria-live="polite"></div>
+  <div class="drawer-foot">
+    <button id="btnCurlImport" class="primary">解析并导入</button>
+    <span class="muted">Ctrl+Enter 导入</span>
+  </div>
+</aside>
+<aside id="historyDrawer" class="drawer" hidden>
+  <div class="drawer-head"><h3>历史记录</h3><button class="mini" id="closeHistory">✕</button></div>
+  <div class="drawer-foot top">
+    <span class="muted">最多 10 条；≤512KB 的响应体保留原文用于对比</span>
+    <button id="btnClearHistory" class="mini danger">清空</button>
+  </div>
+  <div id="historyList" class="scroll-box"></div>
+</aside>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
